@@ -5,10 +5,15 @@ RUN apt-get update -y \
 
 RUN ldconfig /usr/local/cuda-12.9/compat/
 
-# Install vLLM with FlashInfer - use CUDA 12.8 PyTorch wheels (compatible with vLLM 0.15.1)
+# Install vLLM with FlashInfer - use CUDA 12.9 PyTorch wheels.
 RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install "vllm[flashinfer]==0.16.0" --extra-index-url https://download.pytorch.org/whl/cu129
+    python3 -m pip install --no-cache-dir "vllm[flashinfer]==0.19.0" \
+        --extra-index-url https://download.pytorch.org/whl/cu129 && \
+    python3 -m pip install --no-cache-dir --upgrade "transformers>=4.56.0,<5"
 
+# Gemma 4 tool template
+RUN mkdir -p /templates
+COPY tool_chat_template_gemma4.jinja /templates/tool_chat_template_gemma4.jinja
 
 
 # Install additional Python dependencies (after vLLM to avoid PyTorch version conflicts)

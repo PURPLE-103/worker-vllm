@@ -14,6 +14,8 @@ ENV_ALIASES = {
     "TOKENIZER_NAME": "tokenizer",
 }
 
+HF_CACHE_ROOT = "/runpod-volume/huggingface-cache/hub"
+
 # Literal defaults from original worker (used when env/local do not set a value)
 DEFAULT_ARGS = {
     "disable_log_stats": False,
@@ -163,6 +165,37 @@ def _apply_env_aliases(args: dict) -> None:
             )
         except (ValueError, TypeError, json.JSONDecodeError) as e:
             logging.warning("Skip env alias %s=%r: %s", alias, value, e)
+
+
+def resolve_cached_snapshot_path(model_id):
+    if model_id.startswith("/") or "://" in model_id or "/" not in model_id:
+        return None
+
+    org, name = model_id.split("/", 1)
+    if not org or not name or "/" in name:
+        return None
+
+    model_root = os.path.join(HF_CACHE_ROOT, f"models--{org}--{name}")
+    refs_main = os.path.join(model_root, "refs", "main")
+    snapshots_dir = os.path.join(model_root, "snapshots")
+
+    if os.path.isfile(refs_main):
+        with open(refs_main, "r", encoding="utf-8") as f:
+            snapshot_hash = f.read().strip()
+        candidate = os.path.join(snapshots_dir, snapshot_hash)
+        if os.path.isdir(candidate):
+            return candidate
+
+    if os.path.isdir(snapshots_dir):
+        versions = sorted(
+            d for d in os.listdir(snapshots_dir)
+            if os.path.isdir(os.path.join(snapshots_dir, d))
+        )
+        if versions:
+            return os.path.join(snapshots_dir, versions[-1])
+
+    return None
+
 
 def get_speculative_config():
     """Build speculative decoding configuration from environment variables.
@@ -360,6 +393,17 @@ def get_engine_args():
 
     # Backward-compat aliases (MODEL_NAME → model, etc.)
     _apply_env_aliases(args)
+
+    model_id = args.get("model")
+    if isinstance(model_id, str):
+        cached_path = resolve_cached_snapshot_path(model_id)
+        if cached_path:
+            args["model"] = cached_path
+            if not args.get("tokenizer"):
+                args["tokenizer"] = cached_path
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
+            logging.info("Using cached model snapshot: %s", cached_path)
 
     # Local baked-in model overrides
     local = get_local_args()

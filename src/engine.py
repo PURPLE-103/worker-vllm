@@ -16,6 +16,7 @@ from vllm.entrypoints.openai.engine.protocol import ErrorResponse
 from vllm.entrypoints.openai.models.protocol import BaseModelPath, LoRAModulePath
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
 
+from chat_templates import load_chat_template_override
 from constants import DEFAULT_BATCH_SIZE, DEFAULT_BATCH_SIZE_GROWTH_FACTOR, DEFAULT_MAX_CONCURRENCY, DEFAULT_MIN_BATCH_SIZE
 from engine_args import get_engine_args
 from tokenizer import TokenizerWrapper
@@ -63,7 +64,7 @@ class vLLMEngine:
                 class MinimalTokenizerWrapper:
                     def __init__(self, tokenizer):
                         self.tokenizer = tokenizer
-                        self.custom_chat_template = os.getenv("CUSTOM_CHAT_TEMPLATE")
+                        self.custom_chat_template = load_chat_template_override()
                         self.has_chat_template = bool(self.tokenizer.chat_template) or bool(self.custom_chat_template)
                         if self.custom_chat_template and isinstance(self.custom_chat_template, str):
                             self.tokenizer.chat_template = self.custom_chat_template
@@ -247,6 +248,9 @@ class OpenAIvLLMEngine(vLLMEngine):
         chat_template = None
         if self.tokenizer and hasattr(self.tokenizer, 'tokenizer'):
             chat_template = self.tokenizer.tokenizer.chat_template
+
+        if not chat_template:
+            chat_template = load_chat_template_override()
         
         self.chat_engine = OpenAIServingChat(
             engine_client=self.llm, 
@@ -342,4 +346,3 @@ class OpenAIvLLMEngine(vLLMEngine):
                 if self.raw_openai_output:
                     batch = "".join(batch)
                 yield batch
-            
