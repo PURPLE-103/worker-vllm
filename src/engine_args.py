@@ -15,6 +15,8 @@ ENV_ALIASES = {
 }
 
 HF_CACHE_ROOT = "/runpod-volume/huggingface-cache/hub"
+SUPERGEMMA4_MODEL_ID = "Jiunsong/supergemma4-26b-abliterated-multimodal"
+SUPERGEMMA4_DEFAULT_MAX_MODEL_LEN = 32768
 
 # Literal defaults from original worker (used when env/local do not set a value)
 DEFAULT_ARGS = {
@@ -195,6 +197,37 @@ def resolve_cached_snapshot_path(model_id):
             return os.path.join(snapshots_dir, versions[-1])
 
     return None
+
+
+def _is_supergemma4_model(model_id):
+    if not isinstance(model_id, str):
+        return False
+
+    normalized = model_id.rstrip("/")
+    cache_fragment = "models--Jiunsong--supergemma4-26b-abliterated-multimodal"
+    return normalized == SUPERGEMMA4_MODEL_ID or cache_fragment in normalized
+
+
+def _apply_supergemma4_defaults(args, model_id_candidates):
+    if not any(_is_supergemma4_model(model_id) for model_id in model_id_candidates):
+        return
+
+    if args.get("max_model_len") in (None, "", "None"):
+        args["max_model_len"] = SUPERGEMMA4_DEFAULT_MAX_MODEL_LEN
+        logging.info(
+            "Defaulting SuperGemma4 max_model_len to %s. Set MAX_MODEL_LEN to override.",
+            SUPERGEMMA4_DEFAULT_MAX_MODEL_LEN,
+        )
+
+    if args.get("max_num_batched_tokens") in (None, "", "None"):
+        args["max_num_batched_tokens"] = args["max_model_len"]
+
+    if (
+        os.getenv("MAX_NUM_SEQS") is None
+        and args.get("max_num_seqs") == DEFAULT_ARGS["max_num_seqs"]
+    ):
+        args["max_num_seqs"] = 1
+        logging.info("Defaulting SuperGemma4 max_num_seqs to 1 for larger context.")
 
 
 def get_speculative_config():
@@ -394,6 +427,7 @@ def get_engine_args():
     # Backward-compat aliases (MODEL_NAME → model, etc.)
     _apply_env_aliases(args)
 
+    requested_model_id = args.get("model")
     model_id = args.get("model")
     if isinstance(model_id, str):
         cached_path = resolve_cached_snapshot_path(model_id)
@@ -409,6 +443,11 @@ def get_engine_args():
     local = get_local_args()
     if local:
         args.update(_local_args_to_engine_args(local))
+
+    _apply_supergemma4_defaults(
+        args,
+        (requested_model_id, args.get("model"), args.get("tokenizer")),
+    )
 
     # Filter to valid engine args and drop sentinel empty values
     valid_fields = AsyncEngineArgs.__dataclass_fields__
